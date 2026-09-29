@@ -246,7 +246,8 @@ async def test_recommend_returns_all_default_decisions(
 
     assert agent.calls == 1
     assert set(result["recommendations"]) == set(server.RECOMMENDATION_ROUTE_TYPES)
-    assert result["tool_recommendations"] == list(server.ROUTES["mcp"])
+    assert result["tool_recommendations"] == []
+    assert result["tool_selection"] == "top-1-margin"
     assert result["recommendations"]["workflow"] == "answer"
 
 
@@ -267,9 +268,74 @@ async def test_mcp_servers_can_be_replaced_from_the_environment(
     route = json.loads(await server.route("Inspect the issue", route_type="mcp"))
     catalog = json.loads(server.catalog())
 
-    assert recommendation["tool_recommendations"] == list(candidates)
+    assert recommendation["tool_recommendations"] == []
     assert route["candidates"] == candidates
     assert catalog["routes"]["mcp"] == candidates
+
+
+@pytest.mark.asyncio
+async def test_recommend_uses_a_clear_top_model_score(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A leading score selects one MCP instead of admitting every high score."""
+    async def fake_assess(*_args: object, **_kwargs: object) -> dict[str, object]:
+        return {
+            "choices": {
+                name: {"selected": next(iter(candidates))}
+                for name, candidates in server.ROUTES.items()
+                if name in server.RECOMMENDATION_ROUTE_TYPES
+            },
+            "checks": {
+                "jcodemunch": {"probability": 0.62, "confidence": 0.62},
+                "docs-mcp-server": {"probability": 0.45, "confidence": 0.45},
+                "gitea": {"probability": 0.1, "confidence": 0.1},
+                "asuswrt": {"probability": 0.1, "confidence": 0.1},
+            },
+            "result": {},
+        }
+
+    monkeypatch.setattr(server.router, "assess", fake_assess)
+
+    result = json.loads(await server.recommend("Inspect the repository"))
+
+    assert result["tool_recommendations"] == ["jcodemunch"]
+
+
+@pytest.mark.asyncio
+async def test_recommend_short_circuits_explicit_mcp_keywords(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explicit service identifiers do not depend on a model score."""
+    candidates = {
+        "jira": "Issue tracker",
+        "bitbucket": "Pull requests and pipelines",
+        "grafana": "Observability",
+    }
+    monkeypatch.setenv(server.MCP_SERVERS_ENV, json.dumps(candidates))
+    captured: dict[str, object] = {}
+
+    async def fake_assess(
+        _task: str,
+        route_sets: dict[str, dict[str, str]],
+        checks: dict[str, str],
+    ) -> dict[str, object]:
+        captured["checks"] = checks
+        return {
+            "choices": {
+                name: {"selected": next(iter(options))}
+                for name, options in route_sets.items()
+            },
+            "checks": {},
+            "result": {},
+        }
+
+    monkeypatch.setattr(server.router, "assess", fake_assess)
+
+    result = json.loads(await server.recommend("Investigate ESAPI-123"))
+
+    assert result["tool_recommendations"] == ["jira"]
+    assert result["tool_selection"] == "keyword"
+    assert captured["checks"] == {}
 
 
 def test_mcp_server_override_requires_a_json_object(

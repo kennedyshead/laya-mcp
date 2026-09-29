@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -17,6 +18,13 @@ from .backends import (
 
 SERVER_NAME = "laya-mcp"
 MCP_SERVERS_ENV = "LAYA_MCP_MCP_SERVERS"
+DEFAULT_TOOL_THRESHOLD = 0.4
+DEFAULT_TOOL_MARGIN = 0.1
+MCP_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "jira": (r"\bESAPI-\d+\b",),
+    "bitbucket": (r"\b(?:PR|pull request)\s*#?\d+\b", r"\bpipeline\b"),
+    "grafana": (r"\bmeta24\b", r"\btest\.api\b", r"\bloki\b"),
+}
 
 ROUTES: dict[str, dict[str, str]] = {
     "model": {
@@ -306,6 +314,40 @@ def _validate_threshold(threshold: float) -> float:
     return threshold
 
 
+def _keyword_mcp_recommendations(
+    task: str,
+    candidates: Mapping[str, str],
+) -> list[str]:
+    """Return configured MCPs identified by unambiguous task identifiers."""
+    selected: list[str] = []
+    for name in candidates:
+        patterns = MCP_KEYWORDS.get(name.lower())
+        matches_keyword = patterns and any(
+            re.search(pattern, task, re.IGNORECASE) for pattern in patterns
+        )
+        if matches_keyword:
+            selected.append(name)
+    return selected
+
+
+def _top_mcp_recommendation(
+    scores: Mapping[str, Mapping[str, float]],
+    threshold: float,
+    margin: float,
+) -> list[str]:
+    """Select one clear model winner instead of thresholding noisy scores."""
+    ranked = sorted(
+        scores.items(), key=lambda item: item[1]["probability"], reverse=True
+    )
+    if not ranked or ranked[0][1]["probability"] < threshold:
+        return []
+    if len(ranked) > 1 and (
+        ranked[0][1]["probability"] - ranked[1][1]["probability"] < margin
+    ):
+        return []
+    return [ranked[0][0]]
+
+
 def _choice_decision(answer: Any, candidates: Mapping[str, str]) -> dict[str, Any]:
     if not isinstance(answer, Mapping):
         raise RuntimeError("Laya returned an invalid choice answer")
@@ -448,30 +490,37 @@ async def screen(
 
 
 @mcp.tool()
-async def recommend(task: str, tool_threshold: float = 0.5) -> str:
+async def recommend(
+    task: str,
+    tool_threshold: float = DEFAULT_TOOL_THRESHOLD,
+    tool_margin: float = DEFAULT_TOOL_MARGIN,
+) -> str:
     """Recommend workflow, model, agent, verification, and applicable MCPs.
 
     This is the primary entry point for a consequential coding task. It evaluates
     the configured defaults in one local inference batch and returns evidence.
     """
     tool_threshold = _validate_threshold(tool_threshold)
+    tool_margin = _validate_threshold(tool_margin)
     routes = _configured_routes()
+    keyword_recommendations = _keyword_mcp_recommendations(task, routes["mcp"])
     assessment = await router.assess(
         task,
         {name: routes[name] for name in RECOMMENDATION_ROUTE_TYPES},
-        routes["mcp"],
+        {} if keyword_recommendations else routes["mcp"],
     )
     tool_scores = assessment["checks"]
+    tool_recommendations = keyword_recommendations or _top_mcp_recommendation(
+        tool_scores, tool_threshold, tool_margin
+    )
     decision = {
         "recommendations": {
             name: choice["selected"] for name, choice in assessment["choices"].items()
         },
-        "tool_recommendations": [
-            name
-            for name, score in tool_scores.items()
-            if score["probability"] >= tool_threshold
-        ],
+        "tool_recommendations": tool_recommendations,
         "tool_threshold": tool_threshold,
+        "tool_margin": tool_margin,
+        "tool_selection": "keyword" if keyword_recommendations else "top-1-margin",
         "decisions": assessment["choices"],
         "tool_scores": tool_scores,
         "result": assessment["result"],

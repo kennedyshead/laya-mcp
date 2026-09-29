@@ -21,7 +21,7 @@ from laya_mcp import backends
             "Linux",
             "x86_64",
             "torch",
-            "convaiinnovations/laya-multilingual",
+            "convaiinnovations/laya",
         ),
     ),
 )

@@ -16,7 +16,7 @@ downloads its checkpoint. Later requests reuse the loaded local model.
 | Host | `auto` selects | Default model |
 | --- | --- | --- |
 | Apple Silicon macOS | `mlx` | `aac6fef/laya-multilingual-mlx` |
-| Linux | `torch` | `convaiinnovations/laya-multilingual` |
+| Linux | `torch` | `convaiinnovations/laya` |
 
 Install only the backend the host needs:
 
@@ -58,8 +58,8 @@ checkpoint and an explicit graph path. It never converts a checkpoint on demand:
 ```shell
 uv sync --extra onnx
 export LAYA_MCP_BACKEND=onnx
-export LAYA_MCP_ONNX_MODEL=convaiinnovations/laya-multilingual
-export LAYA_MCP_ONNX_ARTIFACT_PATH=/models/laya-multilingual.onnx
+export LAYA_MCP_ONNX_MODEL=convaiinnovations/laya
+export LAYA_MCP_ONNX_ARTIFACT_PATH=/models/laya.onnx
 uv run laya-mcp
 ```
 
@@ -75,7 +75,7 @@ the supplied graph and may download only the original checkpoint's tokenizer and
 configuration the first time. Hugging Face caches downloaded artifacts, so later
 starts reuse them while the cache remains available.
 
-`laya-multilingual` is a 322M-parameter model. Reserve several hundred MB for
+`laya` is a 422M-parameter English model. Reserve several hundred MB for
 model artifacts and several GB of working memory; exact use depends on backend,
 precision, batch size, and device. MLX is the best default for Apple Silicon.
 Torch is the portable Linux default and works on CPU, but cold loading and single
@@ -92,7 +92,7 @@ and want its path under explicit operational control.
   "backend": {
     "requested": "auto",
     "active": "torch",
-    "model": "convaiinnovations/laya-multilingual",
+    "model": "convaiinnovations/laya",
     "loaded": false
   }
 }
@@ -155,12 +155,14 @@ command or inspect a named file.
 ### `recommend`
 
 The primary entry point for a consequential coding task. It returns one choice
-for each configured `workflow`, `model`, `agent`, and `verification` route, and
-screens every configured MCP independently. This means it can recommend more
-than one MCP when the task benefits from several sources of evidence.
+for each configured `workflow`, `model`, `agent`, and `verification` route. For
+MCPs, explicit Jira, Bitbucket, and Grafana identifiers are matched before MCP
+screening. Otherwise it returns only the model's top MCP when it clears the
+minimum score and leads the runner-up by the configured margin.
 
-Set `tool_threshold` from `0` through `1` to control which screened MCPs appear
-in `tool_recommendations`. All probabilities remain in `tool_scores`.
+Set `tool_threshold` (default `0.4`) and `tool_margin` (default `0.1`) from `0`
+through `1` to control the minimum top score and required lead. All model
+probabilities remain in `tool_scores`.
 
 ### `route`
 

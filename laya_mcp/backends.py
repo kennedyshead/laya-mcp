@@ -18,7 +18,7 @@ ONNX_MODEL_ENV = "LAYA_MCP_ONNX_MODEL"
 ONNX_ARTIFACT_ENV = "LAYA_MCP_ONNX_ARTIFACT_PATH"
 
 DEFAULT_MLX_MODEL = "aac6fef/laya-multilingual-mlx"
-DEFAULT_TORCH_MODEL = "convaiinnovations/laya-multilingual"
+DEFAULT_TORCH_MODEL = "convaiinnovations/laya"
 SUPPORTED_BACKENDS = ("auto", "mlx", "torch", "onnx")
 
 
