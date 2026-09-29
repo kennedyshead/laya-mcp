@@ -376,6 +376,22 @@ Test a trained checkpoint by setting `LAYA_MCP_MODEL=models/mcp-router` before
 starting the server. Do not replace the production default until its held-out
 and regression results improve on the current checkpoint.
 
+For an 8 GiB GPU, full encoder training needs factorized optimizer state and
+activation checkpointing:
+
+```shell
+uv run laya-mcp-train ... --optimizer adafactor --gradient-checkpointing --batch-size 1
+```
+
+Fit the no-ulterior-loss screening temperature on the deterministic held-out
+tasks before using a checkpoint's confidence values:
+
+```shell
+uv run python scripts/calibrate_mcp_checkpoint.py \
+  --corpus corpus/mcp-reviewed.jsonl --servers corpus/servers.json \
+  --model models/mcp-router
+```
+
 For an explicitly experimental local run, `--allow-weak-labels` uses the one
 observed MCP recorded by the extractor as its label. This is not a substitute
 for review; its `training_report.json` records `weak_labels: true`.

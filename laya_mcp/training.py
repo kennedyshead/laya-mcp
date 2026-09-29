@@ -160,6 +160,8 @@ def main() -> None:
     parser.add_argument("--device", default="auto")
     parser.add_argument("--freeze-encoder", action="store_true")
     parser.add_argument("--allow-weak-labels", action="store_true")
+    parser.add_argument("--optimizer", choices=("adamw", "adafactor"), default="adamw")
+    parser.add_argument("--gradient-checkpointing", action="store_true")
     arguments = parser.parse_args()
 
     if not 0 < arguments.holdout_fraction < 0.5:
@@ -207,12 +209,29 @@ def main() -> None:
     if arguments.freeze_encoder:
         for parameter in model.encoder.parameters():
             parameter.requires_grad = False
+    if arguments.gradient_checkpointing:
+        model.encoder.gradient_checkpointing_enable(
+            gradient_checkpointing_kwargs={"use_reentrant": False}
+        )
+        model.head_checkpointing = True
     trainable = [
         parameter for parameter in model.parameters() if parameter.requires_grad
     ]
-    optimizer = torch.optim.AdamW(
-        trainable, lr=arguments.learning_rate, weight_decay=0.01
-    )
+    if arguments.optimizer == "adamw":
+        optimizer = torch.optim.AdamW(
+            trainable, lr=arguments.learning_rate, weight_decay=0.01
+        )
+    else:
+        from transformers import Adafactor
+
+        optimizer = Adafactor(
+            trainable,
+            lr=arguments.learning_rate,
+            scale_parameter=False,
+            relative_step=False,
+            warmup_init=False,
+            weight_decay=0.01,
+        )
 
     holdout_examples, training_examples = _split_examples(
         examples, arguments.holdout_fraction, arguments.seed
@@ -293,6 +312,8 @@ def main() -> None:
                 "device": str(device),
                 "weak_labels": arguments.allow_weak_labels,
                 "freeze_encoder": arguments.freeze_encoder,
+                "optimizer": arguments.optimizer,
+                "gradient_checkpointing": arguments.gradient_checkpointing,
             },
             indent=2,
         )
