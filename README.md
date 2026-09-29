@@ -357,8 +357,8 @@ uv run laya-mcp-train \
   --output models/mcp-router
 ```
 
-Training requires a CUDA GPU and saves a complete Laya checkpoint locally under
-the ignored `models/` directory. Each reviewed task becomes one binary `noul`
+Training requires a CUDA or Apple Metal GPU and saves a complete Laya checkpoint
+locally under the ignored `models/` directory. Each reviewed task becomes one binary `noul`
 decision per MCP, matching `recommend`'s independent MCP-screening questions.
 The deterministic holdout report is evidence of fit, not a release gate; keep a
 separate untouched regression corpus for deployment decisions.
@@ -366,3 +366,7 @@ separate untouched regression corpus for deployment decisions.
 Test a trained checkpoint by setting `LAYA_MCP_MODEL=models/mcp-router` before
 starting the server. Do not replace the production default until its held-out
 and regression results improve on the current checkpoint.
+
+For an explicitly experimental local run, `--allow-weak-labels` uses the one
+observed MCP recorded by the extractor as its label. This is not a substitute
+for review; its `training_report.json` records `weak_labels: true`.

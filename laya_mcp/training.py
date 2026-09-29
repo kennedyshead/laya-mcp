@@ -16,15 +16,26 @@ class Example:
     label: str | None
 
 
-def _load_examples(path: Path, servers: set[str]) -> list[Example]:
+def _load_examples(
+    path: Path, servers: set[str], *, allow_weak_labels: bool = False
+) -> list[Example]:
     examples: list[Example] = []
     with path.open(encoding="utf-8") as corpus:
         for line_number, line in enumerate(corpus, start=1):
             row = json.loads(line)
-            if row.get("label_status") != "reviewed":
-                continue
             task = row.get("task")
             label = row.get("label")
+            if row.get("label_status") != "reviewed":
+                observed = row.get("observed_mcps")
+                if (
+                    not allow_weak_labels
+                    or not isinstance(observed, list)
+                    or len(observed) != 1
+                ):
+                    continue
+                label = observed[0]
+                if label not in servers:
+                    continue
             if not isinstance(task, str) or not task.strip():
                 raise ValueError(f"line {line_number}: task must be a nonempty string")
             if label is not None and label not in servers:
@@ -138,6 +149,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=20260929)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--freeze-encoder", action="store_true")
+    parser.add_argument("--allow-weak-labels", action="store_true")
     arguments = parser.parse_args()
 
     if not 0 < arguments.holdout_fraction < 0.5:
@@ -158,16 +170,21 @@ def main() -> None:
         for name, description in servers.items()
     ):
         raise ValueError("--servers must be a JSON object of MCP names to descriptions")
-    examples = _load_examples(arguments.corpus, set(servers))
+    examples = _load_examples(
+        arguments.corpus, set(servers), allow_weak_labels=arguments.allow_weak_labels
+    )
 
     if arguments.device == "auto":
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if torch.cuda.is_available():
+            device = torch.device("cuda")
+        elif torch.backends.mps.is_available():
+            device = torch.device("mps")
+        else:
+            device = torch.device("cpu")
     else:
         device = torch.device(arguments.device)
     if device.type == "cpu":
-        raise RuntimeError(
-            "training requires a CUDA GPU; CPU training is impractically slow"
-        )
+        raise RuntimeError("training requires a CUDA or Metal GPU")
 
     model_dir = Path(snapshot_download(arguments.model))
     _fix_tokenizer_config(str(model_dir))
@@ -224,7 +241,7 @@ def main() -> None:
             loss.backward()
             torch.nn.utils.clip_grad_norm_(trainable, 1.0)
             optimizer.step()
-            loss_total += float(loss)
+            loss_total += loss.detach().item()
         accuracy = _evaluate(model, holdout, tokenizer, device, torch)
         print(
             f"epoch {epoch + 1}/{arguments.epochs}: "
@@ -250,6 +267,9 @@ def main() -> None:
                 "holdout_accuracy": _evaluate(model, holdout, tokenizer, device, torch),
                 "servers": list(servers),
                 "model": arguments.model,
+                "device": str(device),
+                "weak_labels": arguments.allow_weak_labels,
+                "freeze_encoder": arguments.freeze_encoder,
             },
             indent=2,
         )
