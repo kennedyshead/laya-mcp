@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 from collections.abc import Mapping
 from typing import Any
 
@@ -15,6 +16,7 @@ from .backends import (
 )
 
 SERVER_NAME = "laya-mcp"
+MCP_SERVERS_ENV = "LAYA_MCP_MCP_SERVERS"
 
 ROUTES: dict[str, dict[str, str]] = {
     "model": {
@@ -80,6 +82,8 @@ Use `screen` when zero, one, or many capabilities may apply. It returns a
 probability for every candidate and selects those at or above `threshold`.
 
 Use `catalog` or the `laya://routes` resource to inspect configured defaults.
+Set `LAYA_MCP_MCP_SERVERS` to a JSON object of MCP server names and descriptions
+to replace the built-in MCP candidates.
 
 ## Interpret Results
 
@@ -338,10 +342,29 @@ def _json(value: object) -> str:
     return json.dumps(value, ensure_ascii=True, separators=(",", ":"))
 
 
+def _configured_mcp_servers() -> dict[str, str]:
+    """Read an optional replacement MCP candidate mapping from the environment."""
+    configured = os.getenv(MCP_SERVERS_ENV)
+    if configured is None:
+        return dict(ROUTES["mcp"])
+    try:
+        candidates = json.loads(configured)
+    except json.JSONDecodeError as error:
+        raise ValueError(f"{MCP_SERVERS_ENV} must be a JSON object") from error
+    if not isinstance(candidates, Mapping):
+        raise ValueError(f"{MCP_SERVERS_ENV} must be a JSON object")
+    return _normalize_candidates(candidates, minimum=1, label="MCP server")
+
+
+def _configured_routes() -> dict[str, dict[str, str]]:
+    """Return route defaults with the environment-selected MCP candidates."""
+    return {**ROUTES, "mcp": _configured_mcp_servers()}
+
+
 def _catalog() -> dict[str, Any]:
     return {
         "backend": router.backend_info(),
-        "routes": ROUTES,
+        "routes": _configured_routes(),
         "tools": {
             "recommend": (
                 "One-call defaults for workflow, model, agent, validation, and MCPs."
@@ -385,7 +408,7 @@ async def route(
     any custom mutually exclusive decision. The response includes probabilities.
     """
     if candidates is None:
-        candidates = ROUTES.get(route_type)
+        candidates = _configured_routes().get(route_type)
     if candidates is None:
         valid = ", ".join([*ROUTES, "custom"])
         raise ValueError(
@@ -432,10 +455,11 @@ async def recommend(task: str, tool_threshold: float = 0.5) -> str:
     the configured defaults in one local inference batch and returns evidence.
     """
     tool_threshold = _validate_threshold(tool_threshold)
+    routes = _configured_routes()
     assessment = await router.assess(
         task,
-        {name: ROUTES[name] for name in RECOMMENDATION_ROUTE_TYPES},
-        ROUTES["mcp"],
+        {name: routes[name] for name in RECOMMENDATION_ROUTE_TYPES},
+        routes["mcp"],
     )
     tool_scores = assessment["checks"]
     decision = {

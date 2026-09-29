@@ -250,6 +250,38 @@ async def test_recommend_returns_all_default_decisions(
     assert result["recommendations"]["workflow"] == "answer"
 
 
+@pytest.mark.asyncio
+async def test_mcp_servers_can_be_replaced_from_the_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The MCP candidates used by every public surface share one override."""
+    candidates = {
+        "source": "Inspect repository source code and symbols.",
+        "tracker": "Read project issues and work tracking.",
+    }
+    monkeypatch.setenv(server.MCP_SERVERS_ENV, json.dumps(candidates))
+    agent = FakeAgent()
+    monkeypatch.setattr(server.router, "_agent", agent)
+
+    recommendation = json.loads(await server.recommend("Investigate a regression"))
+    route = json.loads(await server.route("Inspect the issue", route_type="mcp"))
+    catalog = json.loads(server.catalog())
+
+    assert recommendation["tool_recommendations"] == list(candidates)
+    assert route["candidates"] == candidates
+    assert catalog["routes"]["mcp"] == candidates
+
+
+def test_mcp_server_override_requires_a_json_object(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A malformed override fails with configuration guidance, not model output."""
+    monkeypatch.setenv(server.MCP_SERVERS_ENV, "[\"source\"]")
+
+    with pytest.raises(ValueError, match="LAYA_MCP_MCP_SERVERS must be a JSON object"):
+        server.catalog()
+
+
 def test_catalog_and_agent_resources_are_available_without_laya() -> None:
     """Agents can discover routes and operating guidance without model loading."""
     catalog = json.loads(server.catalog())

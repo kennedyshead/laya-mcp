@@ -254,8 +254,25 @@ The built-in routes cover:
 | `verification` | None, targeted, full |
 | `mcp` | jcodemunch, docs-mcp-server, gitea, asuswrt |
 
-Call `catalog` rather than relying on this table when operating a server that
-may have customized `ROUTES` in `laya_mcp/server.py`.
+### Customize MCP Candidates
+
+Set `LAYA_MCP_MCP_SERVERS` to a JSON object to replace the built-in `mcp`
+candidates without editing source. Keys are the MCP server names returned to an
+agent; values should explain when each server is useful to Laya's router.
+
+```shell
+export LAYA_MCP_MCP_SERVERS='{
+  "jcodemunch": "Indexed source code structure, symbols, and references.",
+  "linear": "Project issues, priorities, and engineering work tracking.",
+  "docs": "Current third-party library documentation."
+}'
+uv run laya-mcp
+```
+
+The override applies consistently to `recommend`, `route` with
+`route_type="mcp"`, and `catalog`. It must be a nonempty JSON object with
+nonempty names and descriptions. Call `catalog` rather than relying on this
+table when an environment override is active.
 
 ## Run It
 
