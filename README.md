@@ -346,6 +346,15 @@ Review the candidate file by setting `label_status` to `reviewed` and `label` to
 one configured MCP name or `null`. Save the active MCP mapping separately; it
 is the exact set of capability descriptions used during training.
 
+Create and validate a balanced, privacy-safe seed corpus when no reviewed
+production labels exist yet:
+
+```shell
+uv run python scripts/build_mcp_seed_corpus.py --output corpus/mcp-reviewed.jsonl
+uv run python scripts/validate_mcp_corpus.py \
+  --corpus corpus/mcp-reviewed.jsonl --servers corpus/servers.json
+```
+
 ```shell
 uv sync --extra training --extra torch-cuda
 cat > corpus/servers.json <<'EOF'

@@ -48,6 +48,16 @@ def _load_examples(
     return examples
 
 
+def _split_examples(
+    examples: list[Example], holdout_fraction: float, seed: int
+) -> tuple[list[Example], list[Example]]:
+    """Split whole tasks before expanding them into per-MCP binary decisions."""
+    shuffled = list(examples)
+    random.Random(seed).shuffle(shuffled)
+    holdout_size = max(1, round(len(shuffled) * holdout_fraction))
+    return shuffled[:holdout_size], shuffled[holdout_size:]
+
+
 def _training_item(
     example: Example,
     server: str,
@@ -204,20 +214,31 @@ def main() -> None:
         trainable, lr=arguments.learning_rate, weight_decay=0.01
     )
 
-    items = [
-        item
-        for example in examples
-        for name, description in servers.items()
-        if (
-            item := _training_item(
-                example, name, description, tokenizer, config, build_sequence, QTYPES
+    holdout_examples, training_examples = _split_examples(
+        examples, arguments.holdout_fraction, arguments.seed
+    )
+
+    def make_items(selected: list[Example]) -> list[dict[str, Any]]:
+        return [
+            item
+            for example in selected
+            for name, description in servers.items()
+            if (
+                item := _training_item(
+                    example,
+                    name,
+                    description,
+                    tokenizer,
+                    config,
+                    build_sequence,
+                    QTYPES,
+                )
             )
-        )
-        is not None
-    ]
-    random.Random(arguments.seed).shuffle(items)
-    holdout_size = max(1, round(len(items) * arguments.holdout_fraction))
-    holdout, training = items[:holdout_size], items[holdout_size:]
+            is not None
+        ]
+
+    training = make_items(training_examples)
+    holdout = make_items(holdout_examples)
 
     for epoch in range(arguments.epochs):
         random.Random(arguments.seed + epoch).shuffle(training)
@@ -263,7 +284,9 @@ def main() -> None:
         json.dumps(
             {
                 "examples": len(examples),
-                "decisions": len(items),
+                "decisions": len(training) + len(holdout),
+                "training_examples": len(training_examples),
+                "holdout_examples": len(holdout_examples),
                 "holdout_accuracy": _evaluate(model, holdout, tokenizer, device, torch),
                 "servers": list(servers),
                 "model": arguments.model,

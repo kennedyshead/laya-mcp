@@ -81,3 +81,17 @@ def test_load_examples_skips_weak_labels_outside_the_serving_schema(
         training._load_examples(
             corpus, {"jcodemunch"}, allow_weak_labels=True
         )
+
+
+def test_split_examples_keeps_whole_tasks_together() -> None:
+    """The task-level holdout has no binary-decision leakage into training."""
+    examples = [
+        training.Example(task=f"Task {index}", label=None) for index in range(20)
+    ]
+
+    holdout, train = training._split_examples(examples, 0.2, seed=1)
+
+    assert len(holdout) == 4
+    assert {example.task for example in holdout}.isdisjoint(
+        example.task for example in train
+    )
