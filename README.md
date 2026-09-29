@@ -323,3 +323,21 @@ GitHub Actions runs unit tests and this Torch CPU integration check on Linux.
 The optional CUDA contract job only runs on a labeled self-hosted GPU runner,
 either when manually requested or when `LAYA_MCP_ENABLE_CUDA=true` enables its
 weekly scheduled run.
+
+### Building a Routing Corpus
+
+OpenCode session history can provide candidate routing examples without putting
+private prompts in this repository. Extract locally observed MCP calls into an
+ignored review file, then assign one expected MCP or `null` before adding only
+the reviewed, sanitized examples to model integration tests:
+
+```shell
+uv run python scripts/extract_opencode_mcp_corpus.py \
+  --output corpus/opencode-mcp-candidates.jsonl
+```
+
+Observed calls are weak labels, not training truth: one task may have used an
+unnecessary MCP or several valid MCPs. The extractor never copies tool output,
+only the first user task and the one MCP used in that session. Laya MCP does not
+currently include a fine-tuning pipeline; use reviewed examples as a regression
+corpus until training support and independently labelled data are available.
