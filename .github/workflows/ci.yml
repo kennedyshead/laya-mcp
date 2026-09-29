@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "0 8 * * 1"
+  workflow_dispatch:
+    inputs:
+      run_cuda:
+        description: Run the optional self-hosted CUDA contract test
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Linux unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --extra dev --frozen
+      - run: uv run ruff check .
+      - run: uv run pytest -m "not integration"
+
+  torch-integration:
+    name: Linux CPU Torch integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      LAYA_MCP_BACKEND: torch
+      LAYA_MCP_INTEGRATION_BACKENDS: torch
+      LAYA_MCP_RUN_MODEL_TESTS: "1"
+      USE_TF: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --extra dev --extra torch --frozen
+      - run: uv run pytest -m integration
+
+  cuda-contract:
+    name: Optional self-hosted CUDA contract
+    if: >-
+      (github.event_name == 'schedule' && vars.LAYA_MCP_ENABLE_CUDA == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.run_cuda)
+    runs-on: [self-hosted, linux, x64, gpu]
+    timeout-minutes: 45
+    env:
+      LAYA_MCP_BACKEND: torch
+      LAYA_MCP_EXPECT_CUDA: "1"
+      LAYA_MCP_INTEGRATION_BACKENDS: torch
+      LAYA_MCP_RUN_MODEL_TESTS: "1"
+      USE_TF: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --extra dev --extra torch-cuda --frozen
+      - run: uv run pytest -m integration

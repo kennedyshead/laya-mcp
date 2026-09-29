@@ -1,26 +1,306 @@
 # Laya MCP
 
-Local MCP routing decisions for OpenCode, powered by [Laya MLX](https://github.com/mizorewww/laya-mlx).
+Local, advisory routing decisions for coding agents, powered by
+[Laya](https://huggingface.co/convaiinnovations/laya) without generating text or
+sending task data to a cloud model. The server chooses a local MLX, PyTorch, or
+ONNX Runtime adapter without changing its MCP contract.
 
-The `route` tool selects a route for a coding task. It supports configured
-`model`, `mcp`, and `workflow` candidates, or caller-supplied `custom`
-candidates. The first request downloads the multilingual Laya model; later
-requests use local Apple Silicon inference.
+The server starts and serves `catalog` without importing any model runtime. The
+first routing request lazily loads the selected backend and, when needed,
+downloads its checkpoint. Later requests reuse the loaded local model.
+
+## Backends and Installation
+
+`LAYA_MCP_BACKEND` selects the inference runtime. Its default is `auto`.
+
+| Host | `auto` selects | Default model |
+| --- | --- | --- |
+| Apple Silicon macOS | `mlx` | `aac6fef/laya-multilingual-mlx` |
+| Linux | `torch` | `convaiinnovations/laya-multilingual` |
+
+Install only the backend the host needs:
+
+```shell
+# Apple Silicon macOS
+uv sync --extra mlx
+
+# Linux CPU
+uv sync --extra torch
+
+# Linux CUDA, when a self-hosted runner or deployment needs a CUDA wheel
+uv sync --extra torch-cuda
+```
+
+For a published package, use `pip install "laya-mcp[mlx]"` or
+`pip install "laya-mcp[torch]"`. For a CPU-only Linux pip environment, install
+PyTorch from `https://download.pytorch.org/whl/cpu` first, then install the
+Laya MCP Torch extra. Missing optional dependencies do not stop the MCP server
+from starting; the first inference instead reports the matching `uv sync --extra
+...` command.
+
+Set `LAYA_MCP_BACKEND` to `auto`, `mlx`, `torch`, or `onnx` to choose a runtime
+explicitly:
+
+```shell
+LAYA_MCP_BACKEND=torch uv run laya-mcp
+```
+
+| Variable | Purpose |
+| --- | --- |
+| `LAYA_MCP_BACKEND` | `auto`, `mlx`, `torch`, or `onnx`; `auto` uses the platform defaults above. |
+| `LAYA_MCP_MODEL` | Overrides the MLX or Torch model ID. It is also the ONNX original-model fallback. |
+| `LAYA_MCP_ONNX_MODEL` | Original upstream Laya checkpoint used by ONNX for tokenizer and configuration. Defaults to the Torch model ID. |
+| `LAYA_MCP_ONNX_ARTIFACT_PATH` | Required path to an exported `.onnx` artifact when `LAYA_MCP_BACKEND=onnx`. |
+
+The ONNX adapter uses upstream Laya's `ONNXAgent` and requires both the original
+checkpoint and an explicit graph path. It never converts a checkpoint on demand:
+
+```shell
+uv sync --extra onnx
+export LAYA_MCP_BACKEND=onnx
+export LAYA_MCP_ONNX_MODEL=convaiinnovations/laya-multilingual
+export LAYA_MCP_ONNX_ARTIFACT_PATH=/models/laya-multilingual.onnx
+uv run laya-mcp
+```
+
+Generate or obtain the graph separately with upstream Laya's
+`scripts/export_onnx.py`, using the same original checkpoint. This keeps graph
+generation out of MCP startup and makes the deployed artifact explicit.
+
+### Downloads and Hardware
+
+MLX downloads the converted MLX checkpoint on its first prediction. Torch
+downloads the original upstream checkpoint on its first prediction. ONNX uses
+the supplied graph and may download only the original checkpoint's tokenizer and
+configuration the first time. Hugging Face caches downloaded artifacts, so later
+starts reuse them while the cache remains available.
+
+`laya-multilingual` is a 322M-parameter model. Reserve several hundred MB for
+model artifacts and several GB of working memory; exact use depends on backend,
+precision, batch size, and device. MLX is the best default for Apple Silicon.
+Torch is the portable Linux default and works on CPU, but cold loading and single
+request latency are materially slower than Apple GPU or CUDA inference. A
+CUDA-enabled PyTorch installation is automatically usable by the upstream Torch
+runtime; use `uv sync --extra torch-cuda` for the project-managed CUDA wheel.
+ONNX is intended for deployments that manage a CPU-optimized exported artifact
+and want its path under explicit operational control.
+
+`catalog` exposes the configured backend before a model is loaded:
 
 ```json
 {
-  "task": "Investigate a TypeScript type error in an unfamiliar repository",
-  "route_type": "workflow"
+  "backend": {
+    "requested": "auto",
+    "active": "torch",
+    "model": "convaiinnovations/laya-multilingual",
+    "loaded": false
+  }
 }
 ```
 
-Routing is advisory. An MCP tool cannot directly change OpenCode's selected
-model or invoke another MCP server; agents use the result to make that choice.
+## What It Decides
+
+| Need | Tool | Result |
+| --- | --- | --- |
+| Start a consequential coding task | `recommend` | Workflow, model, agent, verification, and applicable MCPs in one batch |
+| Choose one exclusive option | `route` | One selected candidate with probabilities |
+| Make several exclusive choices | `route_many` | One selected candidate per named route set in one batch |
+| Select zero or more applicable capabilities | `screen` | Per-candidate probabilities and every selection above a threshold |
+| Inspect defaults without loading Laya | `catalog` | Configured candidates, tool semantics, and documentation resources |
+
+Every tool returns a compact JSON string. The raw Laya result is retained under
+`result` so agents can inspect confidence and probabilities instead of treating
+a selected label as unquestionable.
+
+## Agent Quick Start
+
+Use `recommend` once when a task has a real routing decision. It evaluates the
+configured workflow, model, agent, verification, and MCP candidates in one
+local inference batch.
+
+```json
+{
+  "task": "Investigate a TypeScript regression, implement the smallest fix, and run relevant tests"
+}
+```
+
+The result has this shape:
+
+```json
+{
+  "recommendations": {
+    "workflow": "implement",
+    "model": "openai/gpt-5.6-terra",
+    "agent": "direct",
+    "verification": "targeted"
+  },
+  "tool_recommendations": ["jcodemunch", "docs-mcp-server"],
+  "tool_threshold": 0.5,
+  "decisions": {},
+  "tool_scores": {},
+  "result": {}
+}
+```
+
+The selected labels above are illustrative. Treat the actual response as
+advice, not permission to skip user instructions, repository rules, required
+inspection, confirmation, or validation.
+
+Do not route trivial work that already names the required tool or action. For
+example, use the requested tool directly when the user says to run a known test
+command or inspect a named file.
+
+## Tool Reference
+
+### `recommend`
+
+The primary entry point for a consequential coding task. It returns one choice
+for each configured `workflow`, `model`, `agent`, and `verification` route, and
+screens every configured MCP independently. This means it can recommend more
+than one MCP when the task benefits from several sources of evidence.
+
+Set `tool_threshold` from `0` through `1` to control which screened MCPs appear
+in `tool_recommendations`. All probabilities remain in `tool_scores`.
+
+### `route`
+
+Choose one option from a configured route type or from custom candidates.
+Configured types are `model`, `mcp`, `workflow`, `agent`, and `verification`.
+
+```json
+{
+  "task": "Pick the best way to investigate a flaky CI failure",
+  "route_type": "agent"
+}
+```
+
+```json
+{
+  "task": "Choose an implementation strategy for a backwards-compatible migration",
+  "route_type": "custom",
+  "candidates": {
+    "incremental": "Add the new path while preserving the old behavior.",
+    "cutover": "Replace the old path in one coordinated change."
+  }
+}
+```
+
+Custom candidate labels and descriptions must be nonempty, and there must be at
+least two candidates.
+
+### `route_many`
+
+Evaluate several independent exclusive decisions in one Laya batch. Each key
+names a decision and maps to at least two candidates.
+
+```json
+{
+  "task": "Prepare a production bug fix",
+  "route_sets": {
+    "implementation": {
+      "minimal": "Change only the faulty condition.",
+      "refactor": "Restructure the affected subsystem first."
+    },
+    "validation": {
+      "targeted": "Run focused tests and linting.",
+      "full": "Run the full project verification suite."
+    }
+  }
+}
+```
+
+### `screen`
+
+Use `screen` when more than one capability can be appropriate. It asks an
+independent true-or-false question for each candidate instead of forcing a
+single winner.
+
+```json
+{
+  "task": "Diagnose a new dependency API error",
+  "candidates": {
+    "source": "Inspect the repository source and dependency usage.",
+    "docs": "Read current third-party documentation.",
+    "ci": "Inspect CI logs and recent failed runs."
+  },
+  "threshold": 0.6
+}
+```
+
+`selected` includes candidates at or above `threshold`; `scores` retains the
+probability for every candidate, including those not selected.
+
+### `catalog` and Resources
+
+`catalog` returns the active candidate catalog, selected backend, and model
+without loading Laya. MCP clients that support resources can instead read:
+
+| Resource | Purpose |
+| --- | --- |
+| `laya://guide` | Agent usage rules and result interpretation |
+| `laya://routes` | JSON route catalog and tool semantics |
+
+The server's MCP instructions also direct agents to these resources.
+
+## Configured Defaults
+
+The built-in routes cover:
+
+| Route | Candidates |
+| --- | --- |
+| `model` | Sol, Luna, Terra |
+| `workflow` | Answer, explore, plan, implement, review |
+| `agent` | Direct, explore, general, scout, log-digger |
+| `verification` | None, targeted, full |
+| `mcp` | jcodemunch, docs-mcp-server, gitea, asuswrt |
+
+Call `catalog` rather than relying on this table when operating a server that
+may have customized `ROUTES` in `laya_mcp/server.py`.
+
+## Run It
+
+After installing the platform backend, configure an MCP client to run this
+command from the repository root:
+
+```shell
+uv run laya-mcp
+```
+
+For an absolute client command, use the repository path with uv's directory
+option:
+
+```shell
+uv --directory /path/to/laya-mcp run laya-mcp
+```
+
+The server communicates over stdio.
 
 ## Development
 
 ```shell
-uv sync --extra dev
+# Apple Silicon development
+uv sync --extra dev --extra mlx
+
+# Linux development
+uv sync --extra dev --extra torch
+
+uv run ruff check .
 uv run pytest
 uv run laya-mcp
 ```
+
+The default test run uses backend doubles and does not download a model. Run a
+real contract check for one or more installed runtimes when needed:
+
+```shell
+LAYA_MCP_RUN_MODEL_TESTS=1 \
+LAYA_MCP_INTEGRATION_BACKENDS=torch \
+LAYA_MCP_BACKEND=torch \
+USE_TF=0 \
+uv run pytest -m integration
+```
+
+GitHub Actions runs unit tests and this Torch CPU integration check on Linux.
+The optional CUDA contract job only runs on a labeled self-hosted GPU runner,
+either when manually requested or when `LAYA_MCP_ENABLE_CUDA=true` enables its
+weekly scheduled run.
