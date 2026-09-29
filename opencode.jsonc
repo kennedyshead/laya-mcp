@@ -4,7 +4,7 @@
     "laya": {
       "type": "local",
       "command": ["sh", "scripts/run_remote_mcp.sh"],
-      "cwd": "/Users/magnusknutas/Projects/laya-mcp",
+      "cwd": ".",
       "enabled": true,
       "timeout": 120000
     }
