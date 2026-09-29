@@ -376,6 +376,10 @@ Test a trained checkpoint by setting `LAYA_MCP_MODEL=models/mcp-router` before
 starting the server. Do not replace the production default until its held-out
 and regression results improve on the current checkpoint.
 
+The project `opencode.jsonc` starts the calibrated remote checkpoint over SSH.
+It uses `scripts/run_remote_mcp.sh`; set `LAYA_MCP_REMOTE_HOST` to override its
+default host. Restart OpenCode after changing this configuration.
+
 For an 8 GiB GPU, full encoder training needs factorized optimizer state and
 activation checkpointing:
 

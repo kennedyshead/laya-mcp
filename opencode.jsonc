@@ -1,0 +1,12 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "laya": {
+      "type": "local",
+      "command": ["sh", "scripts/run_remote_mcp.sh"],
+      "cwd": "/Users/magnusknutas/Projects/laya-mcp",
+      "enabled": true,
+      "timeout": 120000
+    }
+  }
+}
