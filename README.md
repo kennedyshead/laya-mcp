@@ -338,6 +338,31 @@ uv run python scripts/extract_opencode_mcp_corpus.py \
 
 Observed calls are weak labels, not training truth: one task may have used an
 unnecessary MCP or several valid MCPs. The extractor never copies tool output,
-only the first user task and the one MCP used in that session. Laya MCP does not
-currently include a fine-tuning pipeline; use reviewed examples as a regression
-corpus until training support and independently labelled data are available.
+only the first user task and the one MCP used in that session.
+
+#### Training
+
+Review the candidate file by setting `label_status` to `reviewed` and `label` to
+one configured MCP name or `null`. Save the active MCP mapping separately; it
+is the exact set of capability descriptions used during training.
+
+```shell
+uv sync --extra training --extra torch-cuda
+cat > corpus/servers.json <<'EOF'
+{"jcodemunch":"Indexed source code structure, symbols, references, and change impact.","docs-mcp-server":"Current third-party library documentation and API guidance.","gitea":"Repository issues, pull requests, reviews, and project work tracking."}
+EOF
+uv run laya-mcp-train \
+  --corpus corpus/opencode-mcp-reviewed.jsonl \
+  --servers corpus/servers.json \
+  --output models/mcp-router
+```
+
+Training requires a CUDA GPU and saves a complete Laya checkpoint locally under
+the ignored `models/` directory. Each reviewed task becomes one binary `noul`
+decision per MCP, matching `recommend`'s independent MCP-screening questions.
+The deterministic holdout report is evidence of fit, not a release gate; keep a
+separate untouched regression corpus for deployment decisions.
+
+Test a trained checkpoint by setting `LAYA_MCP_MODEL=models/mcp-router` before
+starting the server. Do not replace the production default until its held-out
+and regression results improve on the current checkpoint.
