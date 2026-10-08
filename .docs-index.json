@@ -1,0 +1,4 @@
+{
+  "library": "laya-mcp",
+  "roots": ["README.md", "docs/"]
+}

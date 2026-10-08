@@ -1,5 +1,18 @@
 # Laya MCP Agent Instructions
 
+## Find Documentation
+
+- Read `README.md` for installation, API/backend behavior and specialist setup;
+  `docs/documentation.md` defines local sources and indexing boundaries.
+- Search Docs MCP with `laya-mcp` / `committed`. Verify provenance and shared
+  `project_docs.py --status`; use local Markdown for drafts or unavailable search.
+- Local `~/dotfiles/DOCUMENTATION.md` maps all project libraries and maintenance
+  guides. The private routing plan is at
+  `~/dotfiles/docs/plans/model-routing-optimization.md`, in the separate `dotfiles`
+  committed projection after a verified docs commit.
+- Use jcodemunch for code. Preserve uncommitted work; documentation or benchmark
+  scores do not authorize commits, indexing private artifacts or deployment.
+
 ## Purpose
 
 Laya MCP supplies local, typed routing advice for coding work. It does not read
